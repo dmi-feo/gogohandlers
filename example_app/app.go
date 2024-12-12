@@ -10,6 +10,7 @@ import (
 	"os"
 
 	_ "github.com/mattn/go-sqlite3"
+	ggh "gogohandlers"
 )
 
 type ExampleAppErrorData struct {
@@ -109,7 +110,7 @@ type ExampleAppServiceProvider struct {
 func NewExampleAppServiceProvider(filePath string) (*ExampleAppServiceProvider, error) {
 	easp := &ExampleAppServiceProvider{}
 	var err error
-	easp.storage, err = NewTheStorage("/tmp/foo")
+	easp.storage, err = NewTheStorage(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -124,12 +125,12 @@ type PingResponse struct {
 	Message string `json:"message"`
 }
 
-func HandlePing(ggreq GGRequest[ExampleAppServiceProvider, struct{}, struct{}]) (GGResponse[PingResponse], error) {
+func HandlePing(ggreq ggh.GGRequest[ExampleAppServiceProvider, struct{}, struct{}]) (ggh.GGResponse[PingResponse], error) {
 	ggreq.Logger.Info("Preparing pong...")
 	if rand.Intn(2) == 1 {
-		return GGResponse[PingResponse]{nil, THeaders{}}, RandomError{}
+		return ggh.GGResponse[PingResponse]{nil, nil}, RandomError{}
 	}
-	return GGResponse[PingResponse]{
+	return ggh.GGResponse[PingResponse]{
 		&PingResponse{
 			Message: "Pong",
 		},
@@ -146,15 +147,15 @@ type SetValueResponse struct {
 	Message string `json:"message"`
 }
 
-func HandleSetValue(ggreq GGRequest[ExampleAppServiceProvider, SetValueRequest, struct{}]) (GGResponse[SetValueResponse], error) {
+func HandleSetValue(ggreq ggh.GGRequest[ExampleAppServiceProvider, SetValueRequest, struct{}]) (ggh.GGResponse[SetValueResponse], error) {
 	storage := ggreq.ServiceProvider.GetStorage()
 	err := storage.Set(ggreq.RequestData.Key, ggreq.RequestData.Value)
 	if err != nil {
-		return GGResponse[SetValueResponse]{nil, THeaders{}}, DatabaseError{DBMessage: err.Error()}
+		return ggh.GGResponse[SetValueResponse]{nil, nil}, DatabaseError{DBMessage: err.Error()}
 	}
-	return GGResponse[SetValueResponse]{
+	return ggh.GGResponse[SetValueResponse]{
 		&SetValueResponse{Message: "ok"},
-		THeaders{},
+		nil,
 	}, nil
 }
 
@@ -169,23 +170,25 @@ func main() {
 	loggingHandler := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(loggingHandler)
 
-	mux.Handle("GET /ping", &Uitzicht[ExampleAppServiceProvider, struct{}, struct{}, PingResponse, ExampleAppErrorData]{
+	mux.Handle("GET /ping", &ggh.Uitzicht[ExampleAppServiceProvider, struct{}, struct{}, PingResponse, ExampleAppErrorData]{
 		ServiceProvider: sp,
 		HandlerFunc:     HandlePing,
-		Middlewares: []TMiddleware[ExampleAppServiceProvider, struct{}, struct{}, PingResponse]{
-			RequestIDMiddleware[ExampleAppServiceProvider, struct{}, struct{}, PingResponse],
-			RequestLoggingMiddleware[ExampleAppServiceProvider, struct{}, struct{}, PingResponse],
+		//Middlewares: []ggh.TMiddleware[ExampleAppServiceProvider, struct{}, struct{}, PingResponse]{
+		Middlewares: []func(func(ggh.GGRequest[ExampleAppServiceProvider, struct{}, struct{}]) (ggh.GGResponse[PingResponse], error)) func(ggh.GGRequest[ExampleAppServiceProvider, struct{}, struct{}]) (ggh.GGResponse[PingResponse], error){
+			ggh.RequestIDMiddleware[ExampleAppServiceProvider, struct{}, struct{}, PingResponse],
+			ggh.RequestLoggingMiddleware[ExampleAppServiceProvider, struct{}, struct{}, PingResponse],
 		},
 		ErrorHandler: HandleErrors,
 		Logger:       logger,
 	})
 
-	mux.Handle("POST /set_value", &Uitzicht[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse, ExampleAppErrorData]{
+	mux.Handle("POST /set_value", &ggh.Uitzicht[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse, ExampleAppErrorData]{
 		ServiceProvider: sp,
 		HandlerFunc:     HandleSetValue,
-		Middlewares: []TMiddleware[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse]{
-			RequestLoggingMiddleware[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse],
-			RequestIDMiddleware[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse],
+		//Middlewares: []ggh.TMiddleware[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse]{
+		Middlewares: []func(func(ggh.GGRequest[ExampleAppServiceProvider, SetValueRequest, struct{}]) (ggh.GGResponse[SetValueResponse], error)) func(ggh.GGRequest[ExampleAppServiceProvider, SetValueRequest, struct{}]) (ggh.GGResponse[SetValueResponse], error){
+			ggh.RequestLoggingMiddleware[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse],
+			ggh.RequestIDMiddleware[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse],
 		},
 		Logger: logger,
 	})
