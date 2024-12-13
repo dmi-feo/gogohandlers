@@ -125,7 +125,7 @@ type PingResponse struct {
 	Message string `json:"message"`
 }
 
-func HandlePing(ggreq ggh.GGRequest[ExampleAppServiceProvider, struct{}, struct{}]) (ggh.GGResponse[PingResponse], error) {
+func HandlePing(ggreq *ggh.GGRequest[ExampleAppServiceProvider, struct{}, struct{}]) (ggh.GGResponse[PingResponse], error) {
 	ggreq.Logger.Info("Preparing pong...")
 	if rand.Intn(2) == 1 {
 		return ggh.GGResponse[PingResponse]{nil, nil}, RandomError{}
@@ -147,7 +147,7 @@ type SetValueResponse struct {
 	Message string `json:"message"`
 }
 
-func HandleSetValue(ggreq ggh.GGRequest[ExampleAppServiceProvider, SetValueRequest, struct{}]) (ggh.GGResponse[SetValueResponse], error) {
+func HandleSetValue(ggreq *ggh.GGRequest[ExampleAppServiceProvider, SetValueRequest, struct{}]) (ggh.GGResponse[SetValueResponse], error) {
 	storage := ggreq.ServiceProvider.GetStorage()
 	err := storage.Set(ggreq.RequestData.Key, ggreq.RequestData.Value)
 	if err != nil {
@@ -174,7 +174,7 @@ func main() {
 		ServiceProvider: sp,
 		HandlerFunc:     HandlePing,
 		//Middlewares: []ggh.TMiddleware[ExampleAppServiceProvider, struct{}, struct{}, PingResponse]{
-		Middlewares: []func(func(ggh.GGRequest[ExampleAppServiceProvider, struct{}, struct{}]) (ggh.GGResponse[PingResponse], error)) func(ggh.GGRequest[ExampleAppServiceProvider, struct{}, struct{}]) (ggh.GGResponse[PingResponse], error){
+		Middlewares: []func(func(*ggh.GGRequest[ExampleAppServiceProvider, struct{}, struct{}]) (ggh.GGResponse[PingResponse], error)) func(*ggh.GGRequest[ExampleAppServiceProvider, struct{}, struct{}]) (ggh.GGResponse[PingResponse], error){
 			ggh.RequestIDMiddleware[ExampleAppServiceProvider, struct{}, struct{}, PingResponse],
 			ggh.RequestLoggingMiddleware[ExampleAppServiceProvider, struct{}, struct{}, PingResponse],
 		},
@@ -186,7 +186,7 @@ func main() {
 		ServiceProvider: sp,
 		HandlerFunc:     HandleSetValue,
 		//Middlewares: []ggh.TMiddleware[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse]{
-		Middlewares: []func(func(ggh.GGRequest[ExampleAppServiceProvider, SetValueRequest, struct{}]) (ggh.GGResponse[SetValueResponse], error)) func(ggh.GGRequest[ExampleAppServiceProvider, SetValueRequest, struct{}]) (ggh.GGResponse[SetValueResponse], error){
+		Middlewares: []func(func(*ggh.GGRequest[ExampleAppServiceProvider, SetValueRequest, struct{}]) (ggh.GGResponse[SetValueResponse], error)) func(*ggh.GGRequest[ExampleAppServiceProvider, SetValueRequest, struct{}]) (ggh.GGResponse[SetValueResponse], error){
 			ggh.RequestLoggingMiddleware[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse],
 			ggh.RequestIDMiddleware[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse],
 		},

@@ -30,14 +30,14 @@ type GGResponse[TRespBody any] struct {
 }
 
 // Waiting for https://github.com/golang/go/issues/68903
-//type THandlerFunc[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody any] = func(GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error)
+//type THandlerFunc[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody any] = func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error)
 //type TMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody any] = func(THandlerFunc[TServiceProvider, TReqBody, TGetParams, TRespBody]) THandlerFunc[TServiceProvider, TReqBody, TGetParams, TRespBody]
 
 type Uitzicht[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData any] struct {
 	ServiceProvider *TServiceProvider
-	HandlerFunc     func(GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error)
+	HandlerFunc     func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error)
 	// Middlewares     []func(THandlerFunc[TServiceProvider, TReqBody, TGetParams, TRespBody]) THandlerFunc[TServiceProvider, TReqBody, TGetParams, TRespBody]
-	Middlewares  []func(func(GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error)) func(GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error)
+	Middlewares  []func(func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error)) func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error)
 	ErrorHandler func(err error, l *slog.Logger) (int, TErrorData)
 	Logger       *slog.Logger
 }
@@ -55,7 +55,7 @@ func (u *Uitzicht[TServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData]
 		}
 	}
 
-	ggreq := GGRequest[TServiceProvider, TReqBody, TGetParams]{
+	ggreq := &GGRequest[TServiceProvider, TReqBody, TGetParams]{
 		ServiceProvider: *u.ServiceProvider,
 		RequestData:     reqBody,
 		//GetParams:       nil,
@@ -72,7 +72,7 @@ func (u *Uitzicht[TServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData]
 	statusCode := http.StatusOK // FIXME
 	var errorData TErrorData
 	if handlerErr != nil {
-		statusCode, errorData = u.ErrorHandler(handlerErr, u.Logger)
+		statusCode, errorData = u.ErrorHandler(handlerErr, ggreq.Logger)
 	}
 
 	w.Header().Set("Content-Type", "application/json") // FIXME
@@ -102,8 +102,8 @@ func (u *Uitzicht[TServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData]
 }
 
 // func RequestIDMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody any](hFunc THandlerFunc[TServiceProvider, TReqBody, TGetParams, TRespBody]) THandlerFunc[TServiceProvider, TReqBody, TGetParams, TRespBody] {
-func RequestIDMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody any](hFunc func(GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error)) func(GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error) {
-	return func(ggreq GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error) {
+func RequestIDMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody any](hFunc func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error)) func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error) {
+	return func(ggreq *GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error) {
 		var requestID string
 		if requestIDHeader, ok := ggreq.Request.Header["X-Request-Id"]; ok {
 			requestID = requestIDHeader[0]
@@ -122,8 +122,8 @@ func RequestIDMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams,
 }
 
 // func RequestLoggingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody any](hFunc THandlerFunc[TServiceProvider, TReqBody, TGetParams, TRespBody]) THandlerFunc[TServiceProvider, TReqBody, TGetParams, TRespBody] {
-func RequestLoggingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody any](hFunc func(GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error)) func(GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error) {
-	return func(ggreq GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error) {
+func RequestLoggingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody any](hFunc func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error)) func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error) {
+	return func(ggreq *GGRequest[TServiceProvider, TReqBody, TGetParams]) (GGResponse[TRespBody], error) {
 		reqIDValue := ggreq.Request.Context().Value(requestIDContextKey)
 		var requestID string
 		if reqIDValue != nil {
