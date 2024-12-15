@@ -33,9 +33,9 @@ const (
 type ServiceProvider interface{}
 
 type GGRequest[TServiceProvider ServiceProvider, TReqBody, TGetParams any] struct {
-	ServiceProvider TServiceProvider
+	ServiceProvider *TServiceProvider
 	RequestData     *TReqBody
-	GetParams       TGetParams
+	GetParams       *TGetParams
 	Request         *http.Request
 	Logger          *slog.Logger
 }
@@ -63,7 +63,7 @@ type Uitzicht[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody,
 
 func (u *Uitzicht[TServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ggreq := &GGRequest[TServiceProvider, TReqBody, TGetParams]{
-		ServiceProvider: *u.ServiceProvider,
+		ServiceProvider: u.ServiceProvider,
 		RequestData:     nil,
 		//GetParams:       nil,
 		Request: r,
