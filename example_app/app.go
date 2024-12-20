@@ -46,10 +46,11 @@ func (err DatabaseError) Error() string {
 }
 
 type TheStorage struct {
+	logger   *slog.Logger
 	filePath string
 }
 
-func NewTheStorage(filePath string) (*TheStorage, error) {
+func NewTheStorage(filePath string, logger *slog.Logger) (*TheStorage, error) {
 	db, err := sql.Open("sqlite3", filePath)
 	defer db.Close()
 	if err != nil {
@@ -59,7 +60,7 @@ func NewTheStorage(filePath string) (*TheStorage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TheStorage{filePath: filePath}, nil
+	return &TheStorage{filePath: filePath, logger: logger}, nil
 }
 
 func (ts *TheStorage) getDb() (*sql.DB, error) {
@@ -89,6 +90,7 @@ func (ts *TheStorage) Get(key string) (any, error) {
 }
 
 func (ts *TheStorage) Set(key string, value any) error {
+	ts.logger.Info("Setting key", slog.String("key", key))
 	db, err := ts.getDb()
 	if err != nil {
 		return err
@@ -102,13 +104,14 @@ func (ts *TheStorage) Set(key string, value any) error {
 }
 
 type ExampleAppServiceProvider struct {
+	logger  *slog.Logger
 	storage *TheStorage
 }
 
-func NewExampleAppServiceProvider(filePath string) (*ExampleAppServiceProvider, error) {
-	easp := &ExampleAppServiceProvider{}
+func NewExampleAppServiceProvider(filePath string, logger *slog.Logger) (*ExampleAppServiceProvider, error) {
+	easp := &ExampleAppServiceProvider{logger: logger}
 	var err error
-	easp.storage, err = NewTheStorage(filePath)
+	easp.storage, err = NewTheStorage(filePath, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -156,15 +159,15 @@ func HandleSetValue(ggreq *ggh.GGRequest[ExampleAppServiceProvider, SetValueRequ
 }
 
 func main() {
+	loggingHandler := slog.NewJSONHandler(os.Stdout, nil)
+	logger := slog.New(loggingHandler)
+
 	mux := http.NewServeMux()
 
-	sp, err := NewExampleAppServiceProvider("/tmp/foo")
+	sp, err := NewExampleAppServiceProvider("/tmp/foo", logger)
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	loggingHandler := slog.NewJSONHandler(os.Stdout, nil)
-	logger := slog.New(loggingHandler)
 
 	mux.Handle("GET /ping", &ggh.Uitzicht[ExampleAppServiceProvider, struct{}, struct{}, PingResponse, ExampleAppErrorData]{
 		ServiceProvider: sp,
