@@ -3,27 +3,21 @@ package gogohandlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/google/uuid"
+	"github.com/gorilla/schema"
 	"log/slog"
 	"net/http"
-	"slices"
 	"time"
 )
 
-type RequestSerializationError struct {
-	ParserErrorMessage string
+type MiddlewareProcessingError struct {
+	Message    string
+	StatusCode int
 }
 
-func (e RequestSerializationError) Error() string {
-	return e.ParserErrorMessage
-}
-
-type ResponseSerializationError struct {
-	ParserErrorMessage string
-}
-
-func (e ResponseSerializationError) Error() string {
-	return e.ParserErrorMessage
+func (e MiddlewareProcessingError) Error() string {
+	return e.Message
 }
 
 const (
@@ -65,28 +59,39 @@ func (u *Uitzicht[TServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData]
 	ggreq := &GGRequest[TServiceProvider, TReqBody, TGetParams]{
 		ServiceProvider: u.ServiceProvider,
 		RequestData:     nil,
-		//GetParams:       nil,
-		Request: r,
-		Logger:  u.Logger,
+		GetParams:       nil,
+		Request:         r,
+		Logger:          u.Logger,
 	}
 
 	theHandler := u.HandlerFunc
 
-	for _, mw := range slices.Backward(u.Middlewares) {
+	for _, mw := range u.Middlewares {
 		theHandler = mw(theHandler)
 	}
 	ggresp, handlerErr := theHandler(ggreq)
-	if handlerErr != nil {
-		panic(handlerErr)
-	}
 
 	statusCode := http.StatusOK // FIXME
-	if ggresp.ErrorOccured {
-		if ggresp.StatusCode == 0 {
-			statusCode = http.StatusInternalServerError
+	var responseData []byte
+
+	if handlerErr != nil {
+		ggreq.Logger.Warn("Handler returned uncaught error", slog.String("error", handlerErr.Error()))
+		var mProcError MiddlewareProcessingError
+		if errors.As(handlerErr, &mProcError) {
+			statusCode = mProcError.StatusCode
+			responseData = []byte(mProcError.Message)
 		} else {
-			statusCode = ggresp.StatusCode
+			panic(handlerErr) // FIXME
 		}
+	} else {
+		if ggresp.ErrorOccured {
+			if ggresp.StatusCode == 0 {
+				statusCode = http.StatusInternalServerError
+			} else {
+				statusCode = ggresp.StatusCode
+			}
+		}
+		responseData = ggresp.serializedResponse
 	}
 
 	for headerName, headerValues := range ggresp.Headers {
@@ -96,18 +101,19 @@ func (u *Uitzicht[TServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData]
 	}
 
 	w.WriteHeader(statusCode)
-
-	_, err := w.Write(ggresp.serializedResponse)
+	_, err := w.Write(responseData)
 	if err != nil {
-		panic(err)
+		panic(err) // FIXME
 	}
 }
 
 func GetErrorHandlingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData any](errorHandlers ...func(err error, l *slog.Logger) (int, *TErrorData)) func(func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error)) func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error) {
 	return func(hFunc func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error)) func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error) {
 		return func(ggreq *GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error) {
+			ggreq.Logger.Debug("ErrorHandlingMiddleware start")
 			ggresp, err := hFunc(ggreq)
 			if err != nil {
+				ggreq.Logger.Warn("Going to handle error", slog.String("error", err.Error()))
 				statusCode := http.StatusOK // FIXME
 				var errorData *TErrorData
 				for _, errorHandlerFunc := range errorHandlers {
@@ -117,7 +123,7 @@ func GetErrorHandlingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGet
 					}
 				}
 				if statusCode == 0 {
-					statusCode = http.StatusInternalServerError
+					return ggresp, err
 				}
 
 				ggresp.ErrorData = errorData
@@ -125,14 +131,20 @@ func GetErrorHandlingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGet
 				ggresp.ErrorOccured = true
 			}
 
+			ggreq.Logger.Debug("ErrorHandlingMiddleware finish")
 			return ggresp, nil
 		}
 	}
 }
 
-func GetDataProcessingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData any]() func(func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error)) func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error) {
+type DataProcessingMiddlewareSettings struct {
+	ForbidUnknownKeysInGetParams bool
+}
+
+func GetDataProcessingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData any](settings *DataProcessingMiddlewareSettings) func(func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error)) func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error) {
 	return func(hFunc func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error)) func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error) {
 		return func(ggreq *GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error) {
+			ggreq.Logger.Debug("DataProcessingMiddleware start")
 			var reqBody TReqBody
 			if ggreq.Request.Body != http.NoBody {
 				err := json.NewDecoder(ggreq.Request.Body).Decode(&reqBody)
@@ -141,14 +153,25 @@ func GetDataProcessingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGe
 						"Error decoding request body",
 						"error", err,
 					)
-					return nil, RequestSerializationError{ParserErrorMessage: err.Error()}
+					return nil, MiddlewareProcessingError{Message: err.Error(), StatusCode: http.StatusBadRequest}
 				}
 			}
 			ggreq.RequestData = &reqBody
 
+			getParamsDecoder := schema.NewDecoder()
+			if settings != nil {
+				getParamsDecoder.IgnoreUnknownKeys(!settings.ForbidUnknownKeysInGetParams)
+			}
+			var getParams TGetParams
+			err := getParamsDecoder.Decode(&getParams, ggreq.Request.URL.Query())
+			if err != nil {
+				return &GGResponse[TRespBody, TErrorData]{}, MiddlewareProcessingError{Message: err.Error(), StatusCode: http.StatusBadRequest}
+			}
+			ggreq.GetParams = &getParams
+
 			ggresp, err := hFunc(ggreq)
 			if err != nil {
-				panic(err)
+				return &GGResponse[TRespBody, TErrorData]{}, err
 			}
 
 			var bodySerialized []byte
@@ -160,7 +183,7 @@ func GetDataProcessingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGe
 				bodySerialized, serializationError = json.Marshal(ggresp.ErrorData)
 			}
 			if serializationError != nil {
-				return ggresp, RequestSerializationError{ParserErrorMessage: serializationError.Error()}
+				return ggresp, MiddlewareProcessingError{Message: serializationError.Error(), StatusCode: http.StatusBadRequest}
 			}
 			ggresp.serializedResponse = bodySerialized
 			if ggresp.Headers == nil {
@@ -168,6 +191,7 @@ func GetDataProcessingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGe
 			}
 			ggresp.Headers["content-type"] = []string{"application/json"}
 
+			ggreq.Logger.Debug("DataProcessingMiddleware finish")
 			return ggresp, err
 		}
 	}
@@ -176,6 +200,7 @@ func GetDataProcessingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGe
 // func RequestIDMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody any](hFunc THandlerFunc[TServiceProvider, TReqBody, TGetParams, TRespBody]) THandlerFunc[TServiceProvider, TReqBody, TGetParams, TRespBody] {
 func RequestIDMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData any](hFunc func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error)) func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error) {
 	return func(ggreq *GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error) {
+		ggreq.Logger.Debug("RequestIDMiddleware start")
 		var requestID string
 		if requestIDHeader, ok := ggreq.Request.Header["X-Request-Id"]; ok {
 			requestID = requestIDHeader[0]
@@ -189,6 +214,7 @@ func RequestIDMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams,
 			ggresp.Headers = make(map[string][]string)
 		}
 		ggresp.Headers["X-Request-Id"] = []string{requestID}
+		ggreq.Logger.Debug("RequestIDMiddleware finish")
 		return ggresp, err
 	}
 }
@@ -196,6 +222,7 @@ func RequestIDMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams,
 // func RequestLoggingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody any](hFunc THandlerFunc[TServiceProvider, TReqBody, TGetParams, TRespBody]) THandlerFunc[TServiceProvider, TReqBody, TGetParams, TRespBody] {
 func RequestLoggingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData any](hFunc func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error)) func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error) {
 	return func(ggreq *GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error) {
+		ggreq.Logger.Debug("RequestLoggingMiddleware start")
 		reqIDValue := ggreq.Request.Context().Value(requestIDContextKey)
 		var requestID string
 		if reqIDValue != nil {
@@ -219,6 +246,7 @@ func RequestLoggingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGetPa
 			slog.String("url", ggreq.Request.URL.String()),
 			slog.Duration("duration", elapsed),
 		)
+		ggreq.Logger.Debug("RequestLoggingMiddleware finish")
 		return ggresp, err
 	}
 }
