@@ -145,6 +145,10 @@ func GetDataProcessingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGe
 	return func(hFunc func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error)) func(*GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error) {
 		return func(ggreq *GGRequest[TServiceProvider, TReqBody, TGetParams]) (*GGResponse[TRespBody, TErrorData], error) {
 			ggreq.Logger.Debug("DataProcessingMiddleware start")
+			if settings == nil {
+				settings = &DataProcessingMiddlewareSettings{}
+			}
+
 			var reqBody TReqBody
 			if ggreq.Request.Body != http.NoBody {
 				err := json.NewDecoder(ggreq.Request.Body).Decode(&reqBody)
@@ -159,9 +163,7 @@ func GetDataProcessingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGe
 			ggreq.RequestData = &reqBody
 
 			getParamsDecoder := schema.NewDecoder()
-			if settings != nil {
-				getParamsDecoder.IgnoreUnknownKeys(!settings.ForbidUnknownKeysInGetParams)
-			}
+			getParamsDecoder.IgnoreUnknownKeys(!settings.ForbidUnknownKeysInGetParams)
 			var getParams TGetParams
 			err := getParamsDecoder.Decode(&getParams, ggreq.Request.URL.Query())
 			if err != nil {
