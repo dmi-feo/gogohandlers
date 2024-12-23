@@ -150,7 +150,7 @@ func GetDataProcessingMiddleware[TServiceProvider ServiceProvider, TReqBody, TGe
 			}
 
 			var reqBody TReqBody
-			if ggreq.Request.Body != http.NoBody {
+			if ggreq.Request.Body != http.NoBody && ggreq.Request.Body != nil {
 				err := json.NewDecoder(ggreq.Request.Body).Decode(&reqBody)
 				if err != nil {
 					slog.Info(

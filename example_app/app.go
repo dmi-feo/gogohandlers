@@ -69,7 +69,7 @@ func (ts *TheStorage) getDb() (*sql.DB, error) {
 	return sql.Open("sqlite3", ts.filePath)
 }
 
-func (ts *TheStorage) Get(key string) (any, error) {
+func (ts *TheStorage) Get(key string) (*string, error) {
 	db, err := ts.getDb()
 	if err != nil {
 		return nil, err
@@ -88,10 +88,10 @@ func (ts *TheStorage) Get(key string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return value, nil
+	return &value, nil
 }
 
-func (ts *TheStorage) Set(key string, value any) error {
+func (ts *TheStorage) Set(key string, value string) error {
 	ts.logger.Info("Setting key", slog.String("key", key))
 	db, err := ts.getDb()
 	if err != nil {
@@ -125,16 +125,18 @@ func (sp *ExampleAppServiceProvider) GetStorage() *TheStorage {
 }
 
 type PingGetParams struct {
-	Message string `schema:"msg,default:pong"`
+	Message  string `schema:"msg,default:pong"`
+	MayFail  bool   `schema:"mayfail"`
+	MustFail bool   `schema:"mustfail"`
 }
 
 type PingResponse struct {
-	Message string `json:"message"`
+	Message string `json:"msg"`
 }
 
 func HandlePing(ggreq *ggh.GGRequest[ExampleAppServiceProvider, struct{}, PingGetParams]) (*ggh.GGResponse[PingResponse, ExampleAppErrorData], error) {
 	ggreq.Logger.Info("Preparing pong...")
-	if rand.Intn(2) == 1 {
+	if ggreq.GetParams.MayFail && rand.Intn(2) == 1 || ggreq.GetParams.MustFail {
 		return &ggh.GGResponse[PingResponse, ExampleAppErrorData]{}, RandomError{}
 	}
 	return &ggh.GGResponse[PingResponse, ExampleAppErrorData]{
@@ -161,6 +163,22 @@ func HandleSetValue(ggreq *ggh.GGRequest[ExampleAppServiceProvider, SetValueRequ
 	}
 	return &ggh.GGResponse[SetValueResponse, ExampleAppErrorData]{
 		ResponseData: &SetValueResponse{Message: "ok"},
+	}, nil
+}
+
+type GetValueResponse struct {
+	Value string `json:"value"`
+}
+
+func HandleGetValue(ggreq *ggh.GGRequest[ExampleAppServiceProvider, struct{}, struct{}]) (*ggh.GGResponse[GetValueResponse, ExampleAppErrorData], error) {
+	key := ggreq.Request.PathValue("key")
+	storage := ggreq.ServiceProvider.GetStorage()
+	value, err := storage.Get(key)
+	if err != nil {
+		return &ggh.GGResponse[GetValueResponse, ExampleAppErrorData]{}, DatabaseError{DBMessage: err.Error()}
+	}
+	return &ggh.GGResponse[GetValueResponse, ExampleAppErrorData]{
+		ResponseData: &GetValueResponse{Value: *value},
 	}, nil
 }
 
@@ -197,6 +215,18 @@ func main() {
 			ggh.GetDataProcessingMiddleware[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse, ExampleAppErrorData](nil),
 			ggh.RequestLoggingMiddleware[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse, ExampleAppErrorData],
 			ggh.RequestIDMiddleware[ExampleAppServiceProvider, SetValueRequest, struct{}, SetValueResponse, ExampleAppErrorData],
+		},
+		Logger: logger,
+	})
+
+	mux.Handle("POST /get_value/{key}", &ggh.Uitzicht[ExampleAppServiceProvider, struct{}, struct{}, GetValueResponse, ExampleAppErrorData]{
+		ServiceProvider: sp,
+		HandlerFunc:     HandleGetValue,
+		Middlewares: []func(func(*ggh.GGRequest[ExampleAppServiceProvider, struct{}, struct{}]) (*ggh.GGResponse[GetValueResponse, ExampleAppErrorData], error)) func(*ggh.GGRequest[ExampleAppServiceProvider, struct{}, struct{}]) (*ggh.GGResponse[GetValueResponse, ExampleAppErrorData], error){
+			ggh.GetErrorHandlingMiddleware[ExampleAppServiceProvider, struct{}, struct{}, GetValueResponse, ExampleAppErrorData](HandleErrors),
+			ggh.GetDataProcessingMiddleware[ExampleAppServiceProvider, struct{}, struct{}, GetValueResponse, ExampleAppErrorData](nil),
+			ggh.RequestLoggingMiddleware[ExampleAppServiceProvider, struct{}, struct{}, GetValueResponse, ExampleAppErrorData],
+			ggh.RequestIDMiddleware[ExampleAppServiceProvider, struct{}, struct{}, GetValueResponse, ExampleAppErrorData],
 		},
 		Logger: logger,
 	})
