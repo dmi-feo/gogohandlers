@@ -22,13 +22,8 @@ func TestHandlePing(t *testing.T) {
 	handler := ggh.Uitzicht[ExampleAppServiceProvider, struct{}, PingGetParams, PingResponse, ExampleAppErrorData]{
 		ServiceProvider: sp,
 		HandlerFunc:     HandlePing,
-		Middlewares: []func(func(*ggh.GGRequest[ExampleAppServiceProvider, struct{}, PingGetParams]) (*ggh.GGResponse[PingResponse, ExampleAppErrorData], error)) func(*ggh.GGRequest[ExampleAppServiceProvider, struct{}, PingGetParams]) (*ggh.GGResponse[PingResponse, ExampleAppErrorData], error){
-			ggh.GetErrorHandlingMiddleware[ExampleAppServiceProvider, struct{}, PingGetParams, PingResponse, ExampleAppErrorData](HandleErrors),
-			ggh.GetDataProcessingMiddleware[ExampleAppServiceProvider, struct{}, PingGetParams, PingResponse, ExampleAppErrorData](nil),
-			ggh.RequestLoggingMiddleware[ExampleAppServiceProvider, struct{}, PingGetParams, PingResponse, ExampleAppErrorData],
-			ggh.RequestIDMiddleware[ExampleAppServiceProvider, struct{}, PingGetParams, PingResponse, ExampleAppErrorData],
-		},
-		Logger: logger,
+		Middlewares:     getDefaultMiddlewares[struct{}, PingGetParams, PingResponse](),
+		Logger:          logger,
 	}
 
 	t.Run("works without get params", func(t *testing.T) {
