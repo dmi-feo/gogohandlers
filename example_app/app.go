@@ -70,6 +70,7 @@ func (ts *TheStorage) getDb() (*sql.DB, error) {
 }
 
 func (ts *TheStorage) Get(key string) (*string, error) {
+	ts.logger.Info("Getting value for key", slog.String("key", key))
 	db, err := ts.getDb()
 	if err != nil {
 		return nil, err
@@ -177,8 +178,12 @@ func HandleGetValue(ggreq *ggh.GGRequest[ExampleAppServiceProvider, struct{}, st
 	if err != nil {
 		return &ggh.GGResponse[GetValueResponse, ExampleAppErrorData]{}, DatabaseError{DBMessage: err.Error()}
 	}
+	var returnValue string
+	if value != nil {
+		returnValue = *value
+	}
 	return &ggh.GGResponse[GetValueResponse, ExampleAppErrorData]{
-		ResponseData: &GetValueResponse{Value: *value},
+		ResponseData: &GetValueResponse{Value: returnValue},
 	}, nil
 }
 
@@ -216,7 +221,7 @@ func main() {
 		Logger:          logger,
 	})
 
-	mux.Handle("POST /get_value/{key}", &ggh.Uitzicht[ExampleAppServiceProvider, struct{}, struct{}, GetValueResponse, ExampleAppErrorData]{
+	mux.Handle("GET /get_value/{key}", &ggh.Uitzicht[ExampleAppServiceProvider, struct{}, struct{}, GetValueResponse, ExampleAppErrorData]{
 		ServiceProvider: sp,
 		HandlerFunc:     HandleGetValue,
 		Middlewares:     getDefaultMiddlewares[struct{}, struct{}, GetValueResponse](),
