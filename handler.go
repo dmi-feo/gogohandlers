@@ -81,17 +81,19 @@ func (u *Uitzicht[TServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData]
 			statusCode = mProcError.StatusCode
 			responseData = []byte(mProcError.Message)
 		} else {
-			panic(handlerErr) // FIXME
+			statusCode = http.StatusInternalServerError
 		}
 	} else {
-		if ggresp.ErrorOccured {
-			if ggresp.StatusCode == 0 {
+		responseData = ggresp.serializedResponse
+		if ggresp.StatusCode == 0 {
+			if ggresp.ErrorOccured {
 				statusCode = http.StatusInternalServerError
 			} else {
-				statusCode = ggresp.StatusCode
+				statusCode = http.StatusOK
 			}
+		} else {
+			statusCode = ggresp.StatusCode
 		}
-		responseData = ggresp.serializedResponse
 	}
 
 	for headerName, headerValues := range ggresp.Headers {
@@ -103,7 +105,7 @@ func (u *Uitzicht[TServiceProvider, TReqBody, TGetParams, TRespBody, TErrorData]
 	w.WriteHeader(statusCode)
 	_, err := w.Write(responseData)
 	if err != nil {
-		panic(err) // FIXME
+		u.Logger.Warn("Failed to write response", slog.String("error", err.Error()))
 	}
 }
 
