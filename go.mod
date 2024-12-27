@@ -1,4 +1,4 @@
-module gogohandlers
+module github.com/dmi-feo/gogohandlers
 
 go 1.23.1
 
